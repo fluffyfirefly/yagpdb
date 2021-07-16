@@ -15,16 +15,33 @@ RUN CGO_ENABLED=0 GOOS=linux go build -v -ldflags "-X github.com/jonas747/yagpdb
 
 FROM alpine:latest
 
+# add our user and group first to make sure their IDs get assigned consistently, regardless of whatever dependencies get added
+RUN set -eux; \
+	addgroup -g 1000 -S yagpdb; \
+	adduser -u 1000 -S -D -H -s /bin/sh -G yagpdb yagpdb
+
+# Dependencies: su-exec for step-down from root, ca-certificates for client TLS, tzdata for timezone support and ffmpeg for soundboard support
+RUN apk --no-cache add \
+	ca-certificates \
+	ffmpeg \
+	su-exec \
+	tzdata
+
+COPY --from=builder /appbuild/yagpdb/cmd/yagpdb/static /app/static/
+COPY --from=builder /appbuild/yagpdb/cmd/yagpdb/templates /app/templates/
+COPY --from=builder /appbuild/yagpdb/cmd/yagpdb/yagpdb /app/yagpdb
+
+RUN set -eux; \
+	mkdir -p /app/cert /app/soundboard; \
+	chown yagpdb:yagpdb /app/cert /app/soundboard; \
+	chmod 1777 /app /app/cert /app/soundboard
+	
+VOLUME ["/app/cert", "/app/soundboard"]
 WORKDIR /app
-VOLUME ["/app/soundboard", "/app/cert"]
+ENV PATH=/app:$PATH
+
+COPY --from=builder /appbuild/yagpdb/yagpdb_docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["docker-entrypoint.sh"]
+
 EXPOSE 80 443
-
-# Dependencies: ca-certificates for client TLS, tzdata for timezone and ffmpeg for soundboard support
-RUN apk --no-cache add ca-certificates ffmpeg tzdata
-
-COPY --from=builder /appbuild/yagpdb/cmd/yagpdb/static static/
-COPY --from=builder /appbuild/yagpdb/cmd/yagpdb/templates templates/
-COPY --from=builder /appbuild/yagpdb/cmd/yagpdb/yagpdb yagpdb
-
-ENTRYPOINT ["/app/yagpdb"]
-CMD ["-all", "-pa", "-exthttps=false", "-https=true"]
+CMD ["yagpdb", "-all", "-pa", "-exthttps=false", "-https=true"]
